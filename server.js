@@ -6,12 +6,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Подключение к вашей базе данных
+// 🔥 ОБНОВЛЕННЫЕ ДАННЫЕ ОТ FREEDB
 const db = mysql.createConnection({
-  host: "sql107.infinityfree.com",
-  user: "if0_40334985",
-  password: "MAXmax031106",
-  database: "if0_40334985_app_database",
+  host: "sql.freedb.tech",           // ИЗМЕНИТЬ
+  user: "freedb_sensor_user",        // ИЗМЕНИТЬ
+  password: "53dddC!A&VVuFjB",       // ИЗМЕНИТЬ
+  database: "freedb_sensor_data",    // ИЗМЕНИТЬ
   port: 3306
 });
 
@@ -20,7 +20,7 @@ db.connect((err) => {
   if (err) {
     console.error('❌ Ошибка подключения к MySQL:', err.message);
   } else {
-    console.log('✅ Успешно подключено к базе данных');
+    console.log('✅ Успешно подключено к FreeDB MySQL');
   }
 });
 
@@ -41,8 +41,10 @@ app.get('/api/sensor-data', (req, res) => {
   
   db.query(query, (err, results) => {
     if (err) {
+      console.error('❌ Database error:', err.message);
       res.status(500).json({ error: err.message });
     } else {
+      console.log('✅ Data retrieved:', results[0] || 'No data');
       res.json(results[0] || {});
     }
   });
@@ -64,14 +66,20 @@ app.post('/api/sensor-data', (req, res) => {
   
   db.query(query, values, (err, results) => {
     if (err) {
+      console.error('❌ Insert error:', err.message);
       res.status(500).json({ error: err.message });
     } else {
-      res.json({ success: true, message: 'Данные успешно сохранены' });
+      console.log('✅ Data saved to FreeDB. ID:', results.insertId);
+      res.json({ 
+        success: true, 
+        message: 'Данные успешно сохранены в FreeDB',
+        insertId: results.insertId 
+      });
     }
   });
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API запущен на порту ' + PORT);
 });
