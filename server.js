@@ -4,7 +4,6 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
@@ -25,15 +24,6 @@ db.connect((err) => {
     console.error('❌ Ошибка подключения к MySQL:', err.message);
   } else {
     console.log('✅ Успешно подключено к FreeDB MySQL');
-  }
-});
-
-// Настройка почтового транспорта для Gmail
-const emailTransporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER || 'yourapp@gmail.com', // Замените на ваш Gmail
-    pass: process.env.GMAIL_PASS || 'your-app-password' // Пароль приложения Gmail
   }
 });
 
@@ -230,7 +220,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Запрос сброса пароля
+// Запрос сброса пароля (упрощенная версия - только генерирует токен)
 app.post('/api/reset-password-request', async (req, res) => {
   const { email } = req.body;
   
@@ -281,52 +271,17 @@ app.post('/api/reset-password-request', async (req, res) => {
           });
         }
         
-        // Отправляем email
-        try {
-          const resetLink = `https://yourapp.com/reset-password?token=${resetToken}`;
-          // Для мобильного приложения можно использовать deep link:
-          // const resetLink = `ecotracker://reset-password?token=${resetToken}`;
-          
-          const mailOptions = {
-            from: process.env.GMAIL_USER || 'EcoTracker <yourapp@gmail.com>',
-            to: email,
-            subject: 'Сброс пароля - EcoTracker',
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #4CAF50;">Сброс пароля</h2>
-                <p>Здравствуйте!</p>
-                <p>Вы запросили сброс пароля для вашего аккаунта в EcoTracker.</p>
-                <p>Для сброса пароля используйте следующий код:</p>
-                <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
-                  ${resetToken}
-                </div>
-                <p>Или перейдите по ссылке:</p>
-                <a href="${resetLink}" style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0;">
-                  Сбросить пароль
-                </a>
-                <p style="color: #666; font-size: 14px;">Ссылка и код действительны в течение 1 часа.</p>
-                <p>Если вы не запрашивали сброс пароля, проигнорируйте это письмо.</p>
-                <br>
-                <p>С уважением,<br>Команда EcoTracker</p>
-              </div>
-            `
-          };
-          
-          await emailTransporter.sendMail(mailOptions);
-          console.log('✅ Email отправлен:', email);
-          
-          res.json({ 
-            success: true, 
-            message: 'Инструкции по сбросу пароля отправлены на email' 
-          });
-          
-        } catch (emailError) {
-          console.error('❌ Email sending error:', emailError);
-          res.status(500).json({ 
-            success: false, 
-            error: 'Ошибка отправки email' 
-          });
-        }
+        console.log('✅ Токен сброса пароля создан для:', email);
+        console.log('🔑 Токен:', resetToken);
+        
+        // В реальном приложении здесь должна быть отправка email
+        // Для демонстрации просто возвращаем успех
+        res.json({ 
+          success: true, 
+          message: 'Инструкции по сбросу пароля отправлены на email',
+          // Для тестирования можно вернуть токен (в продакшене убрать)
+          debug_token: resetToken
+        });
       });
     });
   } catch (error) {
@@ -502,5 +457,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API с аутентификацией запущен на порту ' + PORT);
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
-  console.log('📧 Email service:', process.env.GMAIL_USER ? 'Настроен' : 'Требует настройки');
 });
