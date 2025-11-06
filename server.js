@@ -27,46 +27,19 @@ db.connect((err) => {
   }
 });
 
-// Функция отправки email с резервными провайдерами
-// Функция отправки email с резервными провайдерами
 const sendResetEmail = async (userEmail, resetToken) => {
-  // Прямое указание учетных данных (замените на свои реальные данные)
-  const emailConfig = {
-    elasticEmail: {
-      user: 'trusovgleb595@gmail.com', // Замените на ваш email
-      apiKey: 'E0D371A2282156C422B0D669AED30DE7DDD3FAC5DFE341EF9240A23169C952F3C8B274171F401C4C44F31A038A323931'   // Замените на ваш API ключ
-    },
-    gmail: {
-      user: 'trusovgleb595@gmail.com',          // Замените на ваш Gmail
-      password: 'vdaj mcyx uwjp sxgd'          // Замените на пароль приложения
-    }
-  };
-
+  // Только Gmail с правильными настройками
   const emailProviders = [
-    // Провайдер 1: Elastic Email (основной)
-    {
-      name: 'Elastic Email',
-      transporter: nodemailer.createTransport({
-        host: 'smtp.elasticemail.com',
-        port: 2525,
-        secure: false,
-        auth: {
-          user: emailConfig.elasticEmail.user,
-          pass: emailConfig.elasticEmail.apiKey
-        }
-      })
-    },
-    // Провайдер 2: Gmail (резервный)
     {
       name: 'Gmail',
       transporter: nodemailer.createTransport({
-        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
         auth: {
-          user: emailConfig.gmail.user,
-          pass: emailConfig.gmail.password
-        },
-        connectionTimeout: 10000,
-        socketTimeout: 10000
+          user: 'trusovgleb595@gmail.com',  // ЗАМЕНИ на свой Gmail
+          pass: 'vdaj mcyx uwjp sxgd'      // ЗАМЕНИ на пароль приложения
+        }
       })
     }
   ];
@@ -75,11 +48,8 @@ const sendResetEmail = async (userEmail, resetToken) => {
     try {
       console.log(`📧 Попытка отправки через ${provider.name}...`);
       
-      await provider.transporter.verify();
-      console.log(`✅ ${provider.name} подключение установлено`);
-
       const mailOptions = {
-        from: `EcoTracker <${emailConfig.gmail.user}>`,
+        from: `EcoTracker <your-email@gmail.com>`,
         to: userEmail,
         subject: 'Сброс пароля - EcoTracker',
         html: `
@@ -111,12 +81,11 @@ const sendResetEmail = async (userEmail, resetToken) => {
       
     } catch (error) {
       console.log(`❌ ${provider.name} не сработал:`, error.message);
-      // Продолжаем к следующему провайдеру
     }
   }
 
-  // Если все провайдеры не сработали
-  console.log('🔐 Все провайдеры email не сработали, возвращаем токен');
+  // Если не сработало - возвращаем токен
+  console.log('🔐 Email не отправлен, возвращаем токен');
   return { 
     success: false, 
     error: 'Используйте этот код для сброса пароля: ' + resetToken,
@@ -486,4 +455,5 @@ app.listen(PORT, () => {
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
   console.log('📧 Email service: Настроен с резервными провайдерами');
 });
+
 
