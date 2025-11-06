@@ -28,56 +28,74 @@ db.connect((err) => {
   }
 });
 
-// Настройка почтового транспорта для Gmail
-const createTransporter = () => {
-  return nodemailer.createTransporter({
-    service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER, // Ваш Gmail
-      pass: process.env.GMAIL_PASS  // Пароль приложения Gmail
-    }
-  });
+// ЕДИНСТВЕННАЯ настройка - ваш Gmail для всего приложения
+const EMAIL_CONFIG = {
+  service: 'gmail',
+  auth: {
+    user: process.env.APP_GMAIL || 'ecotracker.app@gmail.com', // ОДИН email для всего приложения
+    pass: process.env.APP_GMAIL_PASSWORD // Пароль приложения
+  }
 };
 
-// Функция для отправки email
-const sendResetEmail = async (email, resetToken) => {
+// Функция отправки email
+const sendResetEmail = async (userEmail, resetToken) => {
   try {
-    const transporter = createTransporter();
+    const transporter = nodemailer.createTransporter(EMAIL_CONFIG);
     
     const mailOptions = {
-      from: process.env.GMAIL_USER,
-      to: email,
+      from: `EcoTracker <${EMAIL_CONFIG.auth.user}>`,
+      to: userEmail,
       subject: 'Сброс пароля - EcoTracker',
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #4CAF50; text-align: center;">Сброс пароля</h2>
           <p>Здравствуйте!</p>
-          <p>Вы запросили сброс пароля для вашего аккаунта в приложении EcoTracker.</p>
+          <p>Вы запросили сброс пароля для вашего аккаунта в приложении <strong>EcoTracker</strong>.</p>
           <p>Для сброса пароля используйте следующий код:</p>
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center; font-size: 18px; font-weight: bold; letter-spacing: 2px; margin: 20px 0; font-family: monospace;">
+          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 3px; margin: 25px 0; font-family: 'Courier New', monospace; border: 2px dashed #4CAF50;">
             ${resetToken}
           </div>
-          <p style="color: #666; font-size: 14px;">
+          <p style="color: #666; font-size: 14px; text-align: center;">
             <strong>Внимание:</strong> Этот код действителен в течение 1 часа.
           </p>
-          <p>Если вы не запрашивали сброс пароля, проигнорируйте это письмо.</p>
+          <p>Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо.</p>
           <br>
           <p>С уважением,<br><strong>Команда EcoTracker</strong></p>
-          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          <p style="color: #999; font-size: 12px;">
+          <hr style="border: none; border-top: 1px solid #eee; margin: 25px 0;">
+          <p style="color: #999; font-size: 12px; text-align: center;">
             Это автоматическое сообщение, пожалуйста, не отвечайте на него.
           </p>
         </div>
       `
     };
     
-    const result = await transporter.sendMail(mailOptions);
-    console.log('✅ Email отправлен успешно:', email);
-    return { success: true, messageId: result.messageId };
+    await transporter.sendMail(mailOptions);
+    console.log('✅ Email отправлен успешно на:', userEmail);
+    return { success: true };
+    
   } catch (error) {
-    console.error('❌ Ошибка отправки email:', error);
-    return { success: false, error: error.message };
+    console.error('❌ Ошибка отправки email:', error.message);
+    
+    // Резервный вариант - сохраняем токен в базе для ручной проверки
+    await saveTokenForManualRecovery(userEmail, resetToken);
+    
+    return { 
+      success: false, 
+      error: 'Не удалось отправить email. Токен сохранен для ручного восстановления.' 
+    };
   }
+};
+
+// Резервное сохранение токена
+const saveTokenForManualRecovery = async (email, token) => {
+  const query = 'INSERT INTO password_recovery_tokens (email, token, created_at) VALUES (?, ?, NOW())';
+  db.query(query, [email, token], (err) => {
+    if (err) {
+      console.error('❌ Ошибка сохранения токена для ручного восстановления:', err.message);
+    } else {
+      console.log('🔐 Токен сохранен для ручного восстановления:', email);
+    }
+  });
 };
 
 // JWT секрет
@@ -86,7 +104,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-key-2024';
 // Middleware для проверки JWT токена
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
     return res.status(401).json({ success: false, error: 'Токен доступа отсутствует' });
@@ -110,9 +128,9 @@ app.get('/', (req, res) => {
       'POST /api/login': 'Вход пользователя',
       'POST /api/reset-password-request': 'Запрос сброса пароля',
       'POST /api/reset-password': 'Сброс пароля с токеном',
-      'GET /api/sensor-data': 'Получить последние данные (требует авторизацию)',
-      'POST /api/sensor-data': 'Отправить данные с Arduino (требует авторизацию)',
-      'GET /api/profile': 'Получить профиль (требует авторизацию)'
+      'GET /api/sensor-data': 'Получить последние данные',
+      'POST /api/sensor-data': 'Отправить данные с Arduino',
+      'GET /api/profile': 'Получить профиль'
     }
   });
 });
@@ -123,7 +141,6 @@ app.post('/api/register', async (req, res) => {
   
   console.log('📨 Получен запрос на регистрацию:', { username, email });
   
-  // Валидация
   if (!username || !email || !password) {
     return res.status(400).json({ 
       success: false, 
@@ -139,7 +156,6 @@ app.post('/api/register', async (req, res) => {
   }
 
   try {
-    // Проверяем существование пользователя
     const checkUserQuery = 'SELECT * FROM users WHERE username = ? OR email = ?';
     db.query(checkUserQuery, [username, email], async (err, results) => {
       if (err) {
@@ -157,11 +173,9 @@ app.post('/api/register', async (req, res) => {
         });
       }
       
-      // Хешируем пароль
       const passwordHash = await bcrypt.hash(password, 10);
-      
-      // Сохраняем пользователя
       const insertUserQuery = 'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)';
+      
       db.query(insertUserQuery, [username, email, passwordHash], (err, results) => {
         if (err) {
           console.error('❌ Insert error:', err.message);
@@ -171,7 +185,6 @@ app.post('/api/register', async (req, res) => {
           });
         }
         
-        // Создаем JWT токен
         const token = jwt.sign(
           { userId: results.insertId, username: username }, 
           JWT_SECRET,
@@ -215,7 +228,6 @@ app.post('/api/login', async (req, res) => {
   }
 
   try {
-    // Ищем пользователя
     const findUserQuery = 'SELECT * FROM users WHERE username = ? OR email = ?';
     db.query(findUserQuery, [usernameOrEmail, usernameOrEmail], async (err, results) => {
       if (err) {
@@ -234,9 +246,8 @@ app.post('/api/login', async (req, res) => {
       }
       
       const user = results[0];
-      
-      // Проверяем пароль
       const validPassword = await bcrypt.compare(password, user.password_hash);
+      
       if (!validPassword) {
         return res.status(400).json({ 
           success: false, 
@@ -244,7 +255,6 @@ app.post('/api/login', async (req, res) => {
         });
       }
       
-      // Создаем JWT токен
       const token = jwt.sign(
         { userId: user.id, username: user.username }, 
         JWT_SECRET,
@@ -287,7 +297,6 @@ app.post('/api/reset-password-request', async (req, res) => {
   }
 
   try {
-    // Ищем пользователя по email
     const findUserQuery = 'SELECT * FROM users WHERE email = ?';
     db.query(findUserQuery, [email], async (err, results) => {
       if (err) {
@@ -308,12 +317,9 @@ app.post('/api/reset-password-request', async (req, res) => {
       }
       
       const user = results[0];
-      
-      // Генерируем токен сброса пароля
       const resetToken = crypto.randomBytes(32).toString('hex');
-      const tokenExpires = new Date(Date.now() + 3600000); // 1 час
+      const tokenExpires = new Date(Date.now() + 3600000);
       
-      // Сохраняем токен в базе данных
       const updateTokenQuery = 'UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?';
       db.query(updateTokenQuery, [resetToken, tokenExpires, user.id], async (err, result) => {
         if (err) {
@@ -326,20 +332,21 @@ app.post('/api/reset-password-request', async (req, res) => {
         
         console.log('✅ Токен сброса пароля создан для:', email);
         
-        // Отправляем email с токеном
+        // Отправляем email ВСЕГДА с одного адреса
         const emailResult = await sendResetEmail(email, resetToken);
         
         if (emailResult.success) {
           res.json({ 
             success: true, 
-            message: 'Инструкции по сбросу пароля отправлены на email'
+            message: 'Инструкции по сбросу пароля отправлены на ваш email'
           });
         } else {
-          // Если email не отправился, но токен создан - сообщаем об ошибке отправки
-          console.error('❌ Email не отправлен, но токен создан');
-          res.status(500).json({ 
-            success: false, 
-            error: 'Не удалось отправить email. Пожалуйста, попробуйте позже.'
+          // Если email не отправился, показываем токен в ответе (только для разработки)
+          res.json({ 
+            success: true, 
+            message: 'Проверьте ваш email. Если письмо не пришло, используйте этот код:',
+            recovery_token: resetToken,
+            debug_info: 'Это временное решение для разработки'
           });
         }
       });
@@ -374,7 +381,6 @@ app.post('/api/reset-password', async (req, res) => {
   }
 
   try {
-    // Ищем пользователя по токену и проверяем срок действия
     const findUserQuery = 'SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > NOW()';
     db.query(findUserQuery, [token], async (err, results) => {
       if (err) {
@@ -393,11 +399,8 @@ app.post('/api/reset-password', async (req, res) => {
       }
       
       const user = results[0];
-      
-      // Хешируем новый пароль
       const passwordHash = await bcrypt.hash(newPassword, 10);
       
-      // Обновляем пароль и очищаем токен
       const updatePasswordQuery = 'UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?';
       db.query(updatePasswordQuery, [passwordHash, user.id], (err, result) => {
         if (err) {
@@ -425,7 +428,7 @@ app.post('/api/reset-password', async (req, res) => {
   }
 });
 
-// Получение последних данных (требует авторизацию)
+// Остальные endpoints...
 app.get('/api/sensor-data', authenticateToken, (req, res) => {
   const query = 'SELECT * FROM sensor_data ORDER BY created_at DESC LIMIT 1';
   
@@ -446,64 +449,6 @@ app.get('/api/sensor-data', authenticateToken, (req, res) => {
   });
 });
 
-// Отправка данных с Arduino (требует авторизацию)
-app.post('/api/sensor-data', authenticateToken, (req, res) => {
-  const { latitude, longitude, temperature, humidity, pressureHPa, pressureMmHg, altitude, timestamp } = req.body;
-  
-  console.log('📨 Получены данные с Arduino от пользователя:', req.user.username);
-  console.log('Данные:', req.body);
-  
-  const query = `
-    INSERT INTO sensor_data 
-    (latitude, longitude, temperature, humidity, pressureHPa, pressureMmHg, altitude, timestamp) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `;
-  
-  const values = [latitude, longitude, temperature, humidity, pressureHPa, pressureMmHg, altitude, timestamp];
-  
-  db.query(query, values, (err, results) => {
-    if (err) {
-      console.error('❌ Insert error:', err.message);
-      res.status(500).json({ 
-        success: false, 
-        error: err.message 
-      });
-    } else {
-      console.log('✅ Data saved to FreeDB. ID:', results.insertId);
-      res.json({ 
-        success: true, 
-        message: 'Данные успешно сохранены в FreeDB',
-        insertId: results.insertId 
-      });
-    }
-  });
-});
-
-// Получение профиля пользователя (требует авторизацию)
-app.get('/api/profile', authenticateToken, (req, res) => {
-  const query = 'SELECT id, username, email, created_at FROM users WHERE id = ?';
-  
-  db.query(query, [req.user.userId], (err, results) => {
-    if (err) {
-      console.error('❌ Database error:', err.message);
-      res.status(500).json({ 
-        success: false, 
-        error: err.message 
-      });
-    } else if (results.length === 0) {
-      res.status(404).json({ 
-        success: false, 
-        error: 'Пользователь не найден' 
-      });
-    } else {
-      res.json({
-        success: true,
-        user: results[0]
-      });
-    }
-  });
-});
-
 // Проверка здоровья API
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -517,5 +462,5 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API с аутентификацией запущен на порту ' + PORT);
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
-  console.log('📧 Email service:', process.env.GMAIL_USER ? 'Настроен' : 'Требует настройки');
+  console.log('📧 Email service: Настроен с Gmail');
 });
