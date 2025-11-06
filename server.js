@@ -24,6 +24,29 @@ db.connect((err) => {
     console.error('❌ Ошибка подключения к MySQL:', err.message);
   } else {
     console.log('✅ Успешно подключено к FreeDB MySQL');
+    
+    // Проверяем существование колонок reset_token
+    db.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = 'freedb_sensor_data' 
+      AND TABLE_NAME = 'users' 
+      AND COLUMN_NAME IN ('reset_token', 'reset_token_expires')
+    `, (err, results) => {
+      if (err) {
+        console.error('❌ Ошибка проверки структуры таблицы:', err.message);
+      } else {
+        const existingColumns = results.map(row => row.COLUMN_NAME);
+        console.log('📊 Существующие колонки для сброса пароля:', existingColumns);
+        
+        if (!existingColumns.includes('reset_token')) {
+          console.log('⚠️ Колонка reset_token отсутствует. Нужно выполнить ALTER TABLE');
+        }
+        if (!existingColumns.includes('reset_token_expires')) {
+          console.log('⚠️ Колонка reset_token_expires отсутствует. Нужно выполнить ALTER TABLE');
+        }
+      }
+    });
   }
 });
 
@@ -220,7 +243,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Запрос сброса пароля (упрощенная версия - только генерирует токен)
+// Запрос сброса пароля
 app.post('/api/reset-password-request', async (req, res) => {
   const { email } = req.body;
   
@@ -265,6 +288,15 @@ app.post('/api/reset-password-request', async (req, res) => {
       db.query(updateTokenQuery, [resetToken, tokenExpires, user.id], async (err, result) => {
         if (err) {
           console.error('❌ Token update error:', err.message);
+          
+          // Проверяем, если ошибка из-за отсутствующих колонок
+          if (err.message.includes('reset_token')) {
+            return res.status(500).json({ 
+              success: false, 
+              error: 'Система сброса пароля временно недоступна. Пожалуйста, обратитесь к администратору.' 
+            });
+          }
+          
           return res.status(500).json({ 
             success: false, 
             error: 'Ошибка при создании токена' 
@@ -272,15 +304,13 @@ app.post('/api/reset-password-request', async (req, res) => {
         }
         
         console.log('✅ Токен сброса пароля создан для:', email);
-        console.log('🔑 Токен:', resetToken);
+        console.log('🔑 Токен (для тестирования):', resetToken);
         
         // В реальном приложении здесь должна быть отправка email
         // Для демонстрации просто возвращаем успех
         res.json({ 
           success: true, 
-          message: 'Инструкции по сбросу пароля отправлены на email',
-          // Для тестирования можно вернуть токен (в продакшене убрать)
-          debug_token: resetToken
+          message: 'Инструкции по сбросу пароля отправлены на email'
         });
       });
     });
@@ -453,7 +483,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API с аутентификацией запущен на порту ' + PORT);
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
