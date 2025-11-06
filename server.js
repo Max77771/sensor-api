@@ -28,19 +28,20 @@ db.connect((err) => {
   }
 });
 
-// ЕДИНСТВЕННАЯ настройка - ваш Gmail для всего приложения
+// Настройка Gmail
 const EMAIL_CONFIG = {
   service: 'gmail',
   auth: {
-    user: process.env.APP_GMAIL || 'ecotracker.app@gmail.com', // ОДИН email для всего приложения
-    pass: process.env.APP_GMAIL_PASSWORD // Пароль приложения
+    user: process.env.APP_GMAIL || 'ecotracker.app@gmail.com',
+    pass: process.env.APP_GMAIL_PASSWORD || 'vdaj mcyx uwjp sxgd'
   }
 };
 
 // Функция отправки email
 const sendResetEmail = async (userEmail, resetToken) => {
   try {
-    const transporter = nodemailer.createTransporter(EMAIL_CONFIG);
+    // ИСПРАВЛЕНО: createTransport вместо createTransporter
+    const transporter = nodemailer.createTransport(EMAIL_CONFIG);
     
     const mailOptions = {
       from: `EcoTracker <${EMAIL_CONFIG.auth.user}>`,
@@ -61,10 +62,6 @@ const sendResetEmail = async (userEmail, resetToken) => {
           <p>Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо.</p>
           <br>
           <p>С уважением,<br><strong>Команда EcoTracker</strong></p>
-          <hr style="border: none; border-top: 1px solid #eee; margin: 25px 0;">
-          <p style="color: #999; font-size: 12px; text-align: center;">
-            Это автоматическое сообщение, пожалуйста, не отвечайте на него.
-          </p>
         </div>
       `
     };
@@ -76,26 +73,15 @@ const sendResetEmail = async (userEmail, resetToken) => {
   } catch (error) {
     console.error('❌ Ошибка отправки email:', error.message);
     
-    // Резервный вариант - сохраняем токен в базе для ручной проверки
-    await saveTokenForManualRecovery(userEmail, resetToken);
+    // Резервный вариант
+    console.log('🔐 Токен для ручного восстановления:', resetToken);
+    console.log('📧 Для email:', userEmail);
     
     return { 
       success: false, 
-      error: 'Не удалось отправить email. Токен сохранен для ручного восстановления.' 
+      error: 'Не удалось отправить email. Используйте этот код: ' + resetToken
     };
   }
-};
-
-// Резервное сохранение токена
-const saveTokenForManualRecovery = async (email, token) => {
-  const query = 'INSERT INTO password_recovery_tokens (email, token, created_at) VALUES (?, ?, NOW())';
-  db.query(query, [email, token], (err) => {
-    if (err) {
-      console.error('❌ Ошибка сохранения токена для ручного восстановления:', err.message);
-    } else {
-      console.log('🔐 Токен сохранен для ручного восстановления:', email);
-    }
-  });
 };
 
 // JWT секрет
@@ -308,7 +294,6 @@ app.post('/api/reset-password-request', async (req, res) => {
       }
       
       if (results.length === 0) {
-        // Для безопасности не сообщаем, что email не найден
         console.log('📧 Email не найден, но отправляем успешный ответ для безопасности');
         return res.json({ 
           success: true, 
@@ -332,7 +317,7 @@ app.post('/api/reset-password-request', async (req, res) => {
         
         console.log('✅ Токен сброса пароля создан для:', email);
         
-        // Отправляем email ВСЕГДА с одного адреса
+        // Отправляем email
         const emailResult = await sendResetEmail(email, resetToken);
         
         if (emailResult.success) {
@@ -341,12 +326,11 @@ app.post('/api/reset-password-request', async (req, res) => {
             message: 'Инструкции по сбросу пароля отправлены на ваш email'
           });
         } else {
-          // Если email не отправился, показываем токен в ответе (только для разработки)
+          // Если email не отправился, показываем токен
           res.json({ 
             success: true, 
-            message: 'Проверьте ваш email. Если письмо не пришло, используйте этот код:',
-            recovery_token: resetToken,
-            debug_info: 'Это временное решение для разработки'
+            message: emailResult.error,
+            reset_token: resetToken
           });
         }
       });
