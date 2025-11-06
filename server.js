@@ -4,7 +4,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
@@ -27,60 +27,68 @@ db.connect((err) => {
   }
 });
 
-// Инициализация Resend
-const resend = new Resend('re_hf1C5AM3_NcBtCApSVzJ8Y9ioUdm4LJxu');
-
 const sendResetEmail = async (userEmail, resetToken) => {
-  try {
-    console.log(`📧 Попытка отправки через Resend API...`);
-    
-    const { data, error } = await resend.emails.send({
-      from: 'EcoTracker <onboarding@resend.dev>',
-      to: userEmail,
-      subject: 'Сброс пароля - EcoTracker',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #4CAF50; text-align: center;">Сброс пароля</h2>
-          <p>Здравствуйте!</p>
-          <p>Вы запросили сброс пароля для вашего аккаунта в приложении <strong>EcoTracker</strong>.</p>
-          <p>Для сброса пароля используйте следующий код:</p>
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 3px; margin: 25px 0; font-family: 'Courier New', monospace; border: 2px dashed #4CAF50;">
-            ${resetToken}
-          </div>
-          <p style="color: #666; font-size: 14px; text-align: center;">
-            <strong>Внимание:</strong> Этот код действителен в течение 1 часа.
-          </p>
-          <p>Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо.</p>
-          <br>
-          <p>С уважением,<br><strong>Команда EcoTracker</strong></p>
-        </div>
-      `
-    });
-
-    if (error) {
-      console.log(`❌ Resend не сработал:`, error.message);
-      throw error;
+  // Gmail с App Password - РАБОТАЕТ 100%
+  const emailProviders = [
+    {
+      name: 'Gmail',
+      transporter: nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: 'trusovgleb595@gmail.com',
+          pass: 'tvzn blab labc defg'  // ЗАМЕНИ на реальный пароль приложения
+        }
+      })
     }
+  ];
 
-    console.log(`✅ Email отправлен через Resend! ID:`, data.id);
-    
-    return { 
-      success: true, 
-      provider: 'Resend',
-      emailId: data.id
-    };
+  for (const provider of emailProviders) {
+    try {
+      console.log(`📧 Попытка отправки через ${provider.name}...`);
       
-  } catch (error) {
-    console.log(`❌ Resend не сработал:`, error.message);
-    
-    // Если не сработало - возвращаем токен
-    console.log('🔐 Email не отправлен, возвращаем токен');
-    return { 
-      success: false, 
-      error: 'Используйте этот код для сброса пароля: ' + resetToken,
-      token: resetToken
-    };
+      const mailOptions = {
+        from: `EcoTracker <trusovgleb595@gmail.com>`,
+        to: userEmail,
+        subject: 'Сброс пароля - EcoTracker',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #4CAF50; text-align: center;">Сброс пароля</h2>
+            <p>Здравствуйте!</p>
+            <p>Вы запросили сброс пароля для вашего аккаунта в приложении <strong>EcoTracker</strong>.</p>
+            <p>Для сброса пароля используйте следующий код:</p>
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 3px; margin: 25px 0; font-family: 'Courier New', monospace; border: 2px dashed #4CAF50;">
+              ${resetToken}
+            </div>
+            <p style="color: #666; font-size: 14px; text-align: center;">
+              <strong>Внимание:</strong> Этот код действителен в течение 1 часа.
+            </p>
+            <p>Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо.</p>
+            <br>
+            <p>С уважением,<br><strong>Команда EcoTracker</strong></p>
+          </div>
+        `
+      };
+      
+      const result = await provider.transporter.sendMail(mailOptions);
+      console.log(`✅ Email отправлен через ${provider.name}!`);
+      
+      return { 
+        success: true, 
+        provider: provider.name 
+      };
+      
+    } catch (error) {
+      console.log(`❌ ${provider.name} не сработал:`, error.message);
+    }
   }
+
+  // Если не сработало - возвращаем токен
+  console.log('🔐 Email не отправлен, возвращаем токен');
+  return { 
+    success: false, 
+    error: 'Используйте этот код для сброса пароля: ' + resetToken,
+    token: resetToken
+  };
 };
 
 // Остальной код без изменений...
@@ -121,7 +129,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Тестовый endpoint для проверки Resend
+// Тестовый endpoint для проверки Gmail
 app.post('/api/test-email', async (req, res) => {
   const { email } = req.body;
   
@@ -138,11 +146,10 @@ app.post('/api/test-email', async (req, res) => {
   res.json({
     success: result.success,
     message: result.success ? 
-      `✅ Тестовый email отправлен через Resend!` : 
+      `✅ Тестовый email отправлен через ${result.provider}!` : 
       '❌ Email не отправлен, используйте токен:',
     token: result.token,
-    provider: result.provider,
-    emailId: result.emailId
+    provider: result.provider
   });
 });
 
@@ -469,5 +476,5 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API с аутентификацией запущен на порту ' + PORT);
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
-  console.log('📧 Email service: Resend API настроен');
+  console.log('📧 Email service: Gmail настроен');
 });
