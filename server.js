@@ -19,7 +19,6 @@ const db = mysql.createConnection({
   port: 3306
 });
 
-// Проверка подключения
 db.connect((err) => {
   if (err) {
     console.error('❌ Ошибка подключения к MySQL:', err.message);
@@ -28,88 +27,94 @@ db.connect((err) => {
   }
 });
 
-// Улучшенная настройка Gmail для Render
-const createEmailTransporter = () => {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.APP_GMAIL,
-      pass: process.env.APP_GMAIL_PASSWORD
-    },
-    // Важные настройки для хостингов
-    pool: true,
-    maxConnections: 1,
-    maxMessages: 5,
-    rateDelta: 1000,
-    rateLimit: 1,
-    socketTimeout: 60000, // 60 секунд
-    connectionTimeout: 60000, // 60 секунд
-    greetingTimeout: 30000, // 30 секунд
-    secure: true,
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
-};
-
-// Функция отправки email
+// Функция отправки email с резервными провайдерами
 const sendResetEmail = async (userEmail, resetToken) => {
-  let transporter;
-  
-  try {
-    console.log('📧 Попытка отправки email на:', userEmail);
-    
-    transporter = createEmailTransporter();
-    
-    // Проверяем подключение
-    await transporter.verify();
-    console.log('✅ SMTP подключение установлено');
+  const emailProviders = [
+    // Провайдер 1: Elastic Email (основной)
+    {
+      name: 'Elastic Email',
+      transporter: nodemailer.createTransport({
+        host: 'smtp.elasticemail.com',
+        port: 2525,
+        secure: false,
+        auth: {
+          user: process.env.ELASTIC_EMAIL_USER,
+          pass: process.env.ELASTIC_EMAIL_API_KEY
+        }
+      })
+    },
+    // Провайдер 2: Gmail (резервный)
+    {
+      name: 'Gmail',
+      transporter: nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.APP_GMAIL,
+          pass: process.env.APP_GMAIL_PASSWORD
+        },
+        connectionTimeout: 10000,
+        socketTimeout: 10000
+      })
+    }
+  ];
 
-    const mailOptions = {
-      from: `EcoTracker <${process.env.APP_GMAIL}>`,
-      to: userEmail,
-      subject: 'Сброс пароля - EcoTracker',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #4CAF50; text-align: center;">Сброс пароля</h2>
-          <p>Здравствуйте!</p>
-          <p>Вы запросили сброс пароля для вашего аккаунта в приложении <strong>EcoTracker</strong>.</p>
-          <p>Для сброса пароля используйте следующий код:</p>
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 3px; margin: 25px 0; font-family: 'Courier New', monospace; border: 2px dashed #4CAF50;">
-            ${resetToken}
+  for (const provider of emailProviders) {
+    try {
+      console.log(`📧 Попытка отправки через ${provider.name}...`);
+      
+      await provider.transporter.verify();
+      console.log(`✅ ${provider.name} подключение установлено`);
+
+      const mailOptions = {
+        from: `EcoTracker <${process.env.APP_GMAIL}>`,
+        to: userEmail,
+        subject: 'Сброс пароля - EcoTracker',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #4CAF50; text-align: center;">Сброс пароля</h2>
+            <p>Здравствуйте!</p>
+            <p>Вы запросили сброс пароля для вашего аккаунта в приложении <strong>EcoTracker</strong>.</p>
+            <p>Для сброса пароля используйте следующий код:</p>
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 3px; margin: 25px 0; font-family: 'Courier New', monospace; border: 2px dashed #4CAF50;">
+              ${resetToken}
+            </div>
+            <p style="color: #666; font-size: 14px; text-align: center;">
+              <strong>Внимание:</strong> Этот код действителен в течение 1 часа.
+            </p>
+            <p>Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо.</p>
+            <br>
+            <p>С уважением,<br><strong>Команда EcoTracker</strong></p>
           </div>
-          <p style="color: #666; font-size: 14px; text-align: center;">
-            <strong>Внимание:</strong> Этот код действителен в течение 1 часа.
-          </p>
-          <p>Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо.</p>
-          <br>
-          <p>С уважением,<br><strong>Команда EcoTracker</strong></p>
-        </div>
-      `
-    };
-    
-    const result = await transporter.sendMail(mailOptions);
-    console.log('✅ Email отправлен успешно! Message ID:', result.messageId);
-    return { success: true };
-    
-  } catch (error) {
-    console.error('❌ Ошибка отправки email:', error.message);
-    
-    // Всегда возвращаем токен для использования
-    return { 
-      success: false, 
-      error: 'Email не отправлен, но вы можете использовать этот код: ' + resetToken,
-      token: resetToken
-    };
-  } finally {
-    // Закрываем соединение
-    if (transporter) {
-      transporter.close();
+        `
+      };
+      
+      const result = await provider.transporter.sendMail(mailOptions);
+      console.log(`✅ Email отправлен через ${provider.name}!`);
+      
+      // Закрываем соединение
+      provider.transporter.close();
+      
+      return { 
+        success: true, 
+        provider: provider.name 
+      };
+      
+    } catch (error) {
+      console.log(`❌ ${provider.name} не сработал:`, error.message);
+      // Продолжаем к следующему провайдеру
     }
   }
+
+  // Если все провайдеры не сработали
+  console.log('🔐 Все провайдеры email не сработали, возвращаем токен');
+  return { 
+    success: false, 
+    error: 'Используйте этот код для сброса пароля: ' + resetToken,
+    token: resetToken
+  };
 };
 
-// JWT секрет и остальной код остается без изменений...
+// Остальной код без изменений...
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-key-2024';
 
 // Middleware для проверки JWT токена
@@ -146,7 +151,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Регистрация пользователя (без изменений)
+// Регистрация пользователя
 app.post('/api/register', async (req, res) => {
   const { username, email, password } = req.body;
   
@@ -225,7 +230,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Вход пользователя (без изменений)
+// Вход пользователя
 app.post('/api/login', async (req, res) => {
   const { usernameOrEmail, password } = req.body;
   
@@ -342,13 +347,12 @@ app.post('/api/reset-password-request', async (req, res) => {
         
         console.log('✅ Токен сброса пароля создан для:', email);
         
-        // Всегда возвращаем токен, даже если email не отправится
         const emailResult = await sendResetEmail(email, resetToken);
         
         if (emailResult.success) {
           res.json({ 
             success: true, 
-            message: 'Инструкции по сбросу пароля отправлены на ваш email'
+            message: `Инструкции по сбросу пароля отправлены на ваш email (через ${emailResult.provider})`
           });
         } else {
           res.json({ 
@@ -368,7 +372,7 @@ app.post('/api/reset-password-request', async (req, res) => {
   }
 });
 
-// Сброс пароля с токеном (без изменений)
+// Сброс пароля с токеном
 app.post('/api/reset-password', async (req, res) => {
   const { token, newPassword } = req.body;
   
@@ -470,5 +474,5 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API с аутентификацией запущен на порту ' + PORT);
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
-  console.log('📧 Email service: Настроен с улучшенными параметрами');
+  console.log('📧 Email service: Настроен с резервными провайдерами');
 });
