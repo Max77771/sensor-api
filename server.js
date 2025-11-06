@@ -3,7 +3,6 @@ const mysql = require('mysql2');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
 const app = express();
@@ -26,70 +25,6 @@ db.connect((err) => {
     console.log('✅ Успешно подключено к FreeDB MySQL');
   }
 });
-
-const sendResetEmail = async (userEmail, resetToken) => {
-  // Gmail с App Password - РАБОТАЕТ 100%
-  const emailProviders = [
-    {
-      name: 'Gmail',
-      transporter: nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: 'trusovgleb595@gmail.com',
-          pass: 'mkox shai bxbh mlcx'  // ЗАМЕНИ на реальный пароль приложения
-        }
-      })
-    }
-  ];
-
-  for (const provider of emailProviders) {
-    try {
-      console.log(`📧 Попытка отправки через ${provider.name}...`);
-      
-      const mailOptions = {
-        from: `EcoTracker <trusovgleb595@gmail.com>`,
-        to: userEmail,
-        subject: 'Сброс пароля - EcoTracker',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #4CAF50; text-align: center;">Сброс пароля</h2>
-            <p>Здравствуйте!</p>
-            <p>Вы запросили сброс пароля для вашего аккаунта в приложении <strong>EcoTracker</strong>.</p>
-            <p>Для сброса пароля используйте следующий код:</p>
-            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 3px; margin: 25px 0; font-family: 'Courier New', monospace; border: 2px dashed #4CAF50;">
-              ${resetToken}
-            </div>
-            <p style="color: #666; font-size: 14px; text-align: center;">
-              <strong>Внимание:</strong> Этот код действителен в течение 1 часа.
-            </p>
-            <p>Если вы не запрашивали сброс пароля, просто проигнорируйте это письмо.</p>
-            <br>
-            <p>С уважением,<br><strong>Команда EcoTracker</strong></p>
-          </div>
-        `
-      };
-      
-      const result = await provider.transporter.sendMail(mailOptions);
-      console.log(`✅ Email отправлен через ${provider.name}!`);
-      
-      return { 
-        success: true, 
-        provider: provider.name 
-      };
-      
-    } catch (error) {
-      console.log(`❌ ${provider.name} не сработал:`, error.message);
-    }
-  }
-
-  // Если не сработало - возвращаем токен
-  console.log('🔐 Email не отправлен, возвращаем токен');
-  return { 
-    success: false, 
-    error: 'Используйте этот код для сброса пароля: ' + resetToken,
-    token: resetToken
-  };
-};
 
 // Остальной код без изменений...
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-key-2024';
@@ -119,37 +54,10 @@ app.get('/', (req, res) => {
     endpoints: {
       'POST /api/register': 'Регистрация пользователя',
       'POST /api/login': 'Вход пользователя',
-      'POST /api/reset-password-request': 'Запрос сброса пароля',
-      'POST /api/reset-password': 'Сброс пароля с токеном',
       'GET /api/sensor-data': 'Получить последние данные',
       'POST /api/sensor-data': 'Отправить данные с Arduino',
-      'GET /api/profile': 'Получить профиль',
-      'POST /api/test-email': 'Тест отправки email'
+      'GET /api/profile': 'Получить профиль'
     }
-  });
-});
-
-// Тестовый endpoint для проверки Gmail
-app.post('/api/test-email', async (req, res) => {
-  const { email } = req.body;
-  
-  if (!email) {
-    return res.status(400).json({ 
-      success: false, 
-      error: 'Email обязателен' 
-    });
-  }
-
-  const testToken = 'TEST-' + Math.random().toString(36).substr(2, 8).toUpperCase();
-  const result = await sendResetEmail(email, testToken);
-  
-  res.json({
-    success: result.success,
-    message: result.success ? 
-      `✅ Тестовый email отправлен через ${result.provider}!` : 
-      '❌ Email не отправлен, используйте токен:',
-    token: result.token,
-    provider: result.provider
   });
 });
 
@@ -301,147 +209,6 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Запрос сброса пароля
-app.post('/api/reset-password-request', async (req, res) => {
-  const { email } = req.body;
-  
-  console.log('📧 Запрос сброса пароля для email:', email);
-  
-  if (!email) {
-    return res.status(400).json({ 
-      success: false, 
-      error: 'Email обязателен' 
-    });
-  }
-
-  try {
-    const findUserQuery = 'SELECT * FROM users WHERE email = ?';
-    db.query(findUserQuery, [email], async (err, results) => {
-      if (err) {
-        console.error('❌ Database error:', err.message);
-        return res.status(500).json({ 
-          success: false, 
-          error: 'Ошибка базы данных' 
-        });
-      }
-      
-      if (results.length === 0) {
-        console.log('📧 Email не найден, но отправляем успешный ответ для безопасности');
-        return res.json({ 
-          success: true, 
-          message: 'Если email существует, инструкции отправлены' 
-        });
-      }
-      
-      const user = results[0];
-      const resetToken = crypto.randomBytes(32).toString('hex');
-      const tokenExpires = new Date(Date.now() + 3600000);
-      
-      const updateTokenQuery = 'UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?';
-      db.query(updateTokenQuery, [resetToken, tokenExpires, user.id], async (err, result) => {
-        if (err) {
-          console.error('❌ Token update error:', err.message);
-          return res.status(500).json({ 
-            success: false, 
-            error: 'Ошибка при создании токена' 
-          });
-        }
-        
-        console.log('✅ Токен сброса пароля создан для:', email);
-        
-        const emailResult = await sendResetEmail(email, resetToken);
-        
-        if (emailResult.success) {
-          res.json({ 
-            success: true, 
-            message: `Инструкции по сбросу пароля отправлены на ваш email (через ${emailResult.provider})`
-          });
-        } else {
-          res.json({ 
-            success: true, 
-            message: emailResult.error,
-            reset_token: resetToken
-          });
-        }
-      });
-    });
-  } catch (error) {
-    console.error('❌ Reset password request error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Внутренняя ошибка сервера' 
-    });
-  }
-});
-
-// Сброс пароля с токеном
-app.post('/api/reset-password', async (req, res) => {
-  const { token, newPassword } = req.body;
-  
-  console.log('🔄 Запрос установки нового пароля');
-  
-  if (!token || !newPassword) {
-    return res.status(400).json({ 
-      success: false, 
-      error: 'Токен и новый пароль обязательны' 
-    });
-  }
-
-  if (newPassword.length < 6) {
-    return res.status(400).json({ 
-      success: false, 
-      error: 'Пароль должен содержать минимум 6 символов' 
-    });
-  }
-
-  try {
-    const findUserQuery = 'SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > NOW()';
-    db.query(findUserQuery, [token], async (err, results) => {
-      if (err) {
-        console.error('❌ Database error:', err.message);
-        return res.status(500).json({ 
-          success: false, 
-          error: 'Ошибка базы данных' 
-        });
-      }
-      
-      if (results.length === 0) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Неверный или просроченный токен' 
-        });
-      }
-      
-      const user = results[0];
-      const passwordHash = await bcrypt.hash(newPassword, 10);
-      
-      const updatePasswordQuery = 'UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?';
-      db.query(updatePasswordQuery, [passwordHash, user.id], (err, result) => {
-        if (err) {
-          console.error('❌ Password update error:', err.message);
-          return res.status(500).json({ 
-            success: false, 
-            error: 'Ошибка при обновлении пароля' 
-          });
-        }
-        
-        console.log('✅ Пароль обновлен для пользователя:', user.email);
-        
-        res.json({ 
-          success: true, 
-          message: 'Пароль успешно изменен' 
-        });
-      });
-    });
-  } catch (error) {
-    console.error('❌ Reset password error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Внутренняя ошибка сервера' 
-    });
-  }
-});
-
 // Остальные endpoints...
 app.get('/api/sensor-data', authenticateToken, (req, res) => {
   const query = 'SELECT * FROM sensor_data ORDER BY created_at DESC LIMIT 1';
@@ -476,5 +243,4 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API с аутентификацией запущен на порту ' + PORT);
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
-  console.log('📧 Email service: Gmail настроен');
 });
