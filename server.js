@@ -3,6 +3,8 @@ const mysql = require('mysql2');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
@@ -23,6 +25,15 @@ db.connect((err) => {
     console.error('❌ Ошибка подключения к MySQL:', err.message);
   } else {
     console.log('✅ Успешно подключено к FreeDB MySQL');
+  }
+});
+
+// Настройка почтового транспорта для Gmail
+const emailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER || 'yourapp@gmail.com', // Замените на ваш Gmail
+    pass: process.env.GMAIL_PASS || 'your-app-password' // Пароль приложения Gmail
   }
 });
 
@@ -54,6 +65,8 @@ app.get('/', (req, res) => {
     endpoints: {
       'POST /api/register': 'Регистрация пользователя',
       'POST /api/login': 'Вход пользователя',
+      'POST /api/reset-password-request': 'Запрос сброса пароля',
+      'POST /api/reset-password': 'Сброс пароля с токеном',
       'GET /api/sensor-data': 'Получить последние данные (требует авторизацию)',
       'POST /api/sensor-data': 'Отправить данные с Arduino (требует авторизацию)',
       'GET /api/profile': 'Получить профиль (требует авторизацию)'
@@ -217,6 +230,186 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
+// Запрос сброса пароля
+app.post('/api/reset-password-request', async (req, res) => {
+  const { email } = req.body;
+  
+  console.log('📧 Запрос сброса пароля для email:', email);
+  
+  if (!email) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Email обязателен' 
+    });
+  }
+
+  try {
+    // Ищем пользователя по email
+    const findUserQuery = 'SELECT * FROM users WHERE email = ?';
+    db.query(findUserQuery, [email], async (err, results) => {
+      if (err) {
+        console.error('❌ Database error:', err.message);
+        return res.status(500).json({ 
+          success: false, 
+          error: 'Ошибка базы данных' 
+        });
+      }
+      
+      if (results.length === 0) {
+        // Для безопасности не сообщаем, что email не найден
+        console.log('📧 Email не найден, но отправляем успешный ответ для безопасности');
+        return res.json({ 
+          success: true, 
+          message: 'Если email существует, инструкции отправлены' 
+        });
+      }
+      
+      const user = results[0];
+      
+      // Генерируем токен сброса пароля
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const tokenExpires = new Date(Date.now() + 3600000); // 1 час
+      
+      // Сохраняем токен в базе данных
+      const updateTokenQuery = 'UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?';
+      db.query(updateTokenQuery, [resetToken, tokenExpires, user.id], async (err, result) => {
+        if (err) {
+          console.error('❌ Token update error:', err.message);
+          return res.status(500).json({ 
+            success: false, 
+            error: 'Ошибка при создании токена' 
+          });
+        }
+        
+        // Отправляем email
+        try {
+          const resetLink = `https://yourapp.com/reset-password?token=${resetToken}`;
+          // Для мобильного приложения можно использовать deep link:
+          // const resetLink = `ecotracker://reset-password?token=${resetToken}`;
+          
+          const mailOptions = {
+            from: process.env.GMAIL_USER || 'EcoTracker <yourapp@gmail.com>',
+            to: email,
+            subject: 'Сброс пароля - EcoTracker',
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #4CAF50;">Сброс пароля</h2>
+                <p>Здравствуйте!</p>
+                <p>Вы запросили сброс пароля для вашего аккаунта в EcoTracker.</p>
+                <p>Для сброса пароля используйте следующий код:</p>
+                <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+                  ${resetToken}
+                </div>
+                <p>Или перейдите по ссылке:</p>
+                <a href="${resetLink}" style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0;">
+                  Сбросить пароль
+                </a>
+                <p style="color: #666; font-size: 14px;">Ссылка и код действительны в течение 1 часа.</p>
+                <p>Если вы не запрашивали сброс пароля, проигнорируйте это письмо.</p>
+                <br>
+                <p>С уважением,<br>Команда EcoTracker</p>
+              </div>
+            `
+          };
+          
+          await emailTransporter.sendMail(mailOptions);
+          console.log('✅ Email отправлен:', email);
+          
+          res.json({ 
+            success: true, 
+            message: 'Инструкции по сбросу пароля отправлены на email' 
+          });
+          
+        } catch (emailError) {
+          console.error('❌ Email sending error:', emailError);
+          res.status(500).json({ 
+            success: false, 
+            error: 'Ошибка отправки email' 
+          });
+        }
+      });
+    });
+  } catch (error) {
+    console.error('❌ Reset password request error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Внутренняя ошибка сервера' 
+    });
+  }
+});
+
+// Сброс пароля с токеном
+app.post('/api/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body;
+  
+  console.log('🔄 Запрос установки нового пароля');
+  
+  if (!token || !newPassword) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Токен и новый пароль обязательны' 
+    });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Пароль должен содержать минимум 6 символов' 
+    });
+  }
+
+  try {
+    // Ищем пользователя по токену и проверяем срок действия
+    const findUserQuery = 'SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > NOW()';
+    db.query(findUserQuery, [token], async (err, results) => {
+      if (err) {
+        console.error('❌ Database error:', err.message);
+        return res.status(500).json({ 
+          success: false, 
+          error: 'Ошибка базы данных' 
+        });
+      }
+      
+      if (results.length === 0) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Неверный или просроченный токен' 
+        });
+      }
+      
+      const user = results[0];
+      
+      // Хешируем новый пароль
+      const passwordHash = await bcrypt.hash(newPassword, 10);
+      
+      // Обновляем пароль и очищаем токен
+      const updatePasswordQuery = 'UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?';
+      db.query(updatePasswordQuery, [passwordHash, user.id], (err, result) => {
+        if (err) {
+          console.error('❌ Password update error:', err.message);
+          return res.status(500).json({ 
+            success: false, 
+            error: 'Ошибка при обновлении пароля' 
+          });
+        }
+        
+        console.log('✅ Пароль обновлен для пользователя:', user.email);
+        
+        res.json({ 
+          success: true, 
+          message: 'Пароль успешно изменен' 
+        });
+      });
+    });
+  } catch (error) {
+    console.error('❌ Reset password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Внутренняя ошибка сервера' 
+    });
+  }
+});
+
 // Получение последних данных (требует авторизацию)
 app.get('/api/sensor-data', authenticateToken, (req, res) => {
   const query = 'SELECT * FROM sensor_data ORDER BY created_at DESC LIMIT 1';
@@ -309,4 +502,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API с аутентификацией запущен на порту ' + PORT);
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
+  console.log('📧 Email service:', process.env.GMAIL_USER ? 'Настроен' : 'Требует настройки');
 });
