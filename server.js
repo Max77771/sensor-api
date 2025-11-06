@@ -36,7 +36,7 @@ const sendResetEmail = async (userEmail, resetToken) => {
         service: 'gmail',
         auth: {
           user: 'trusovgleb595@gmail.com',
-          pass: 'tvzn blab labc defg'  // ЗАМЕНИ на реальный пароль приложения
+          pass: 'mkox shai bxbh mlcx'  // ЗАМЕНИ на реальный пароль приложения
         }
       })
     }
