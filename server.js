@@ -28,7 +28,20 @@ db.connect((err) => {
 });
 
 // Функция отправки email с резервными провайдерами
+// Функция отправки email с резервными провайдерами
 const sendResetEmail = async (userEmail, resetToken) => {
+  // Прямое указание учетных данных (замените на свои реальные данные)
+  const emailConfig = {
+    elasticEmail: {
+      user: 'trusovgleb595@gmail.com', // Замените на ваш email
+      apiKey: 'E0D371A2282156C422B0D669AED30DE7DDD3FAC5DFE341EF9240A23169C952F3C8B274171F401C4C44F31A038A323931'   // Замените на ваш API ключ
+    },
+    gmail: {
+      user: 'trusovgleb595@gmail.com',          // Замените на ваш Gmail
+      password: 'vdaj mcyx uwjp sxgd'          // Замените на пароль приложения
+    }
+  };
+
   const emailProviders = [
     // Провайдер 1: Elastic Email (основной)
     {
@@ -38,8 +51,8 @@ const sendResetEmail = async (userEmail, resetToken) => {
         port: 2525,
         secure: false,
         auth: {
-          user: process.env.ELASTIC_EMAIL_USER,
-          pass: process.env.ELASTIC_EMAIL_API_KEY
+          user: emailConfig.elasticEmail.user,
+          pass: emailConfig.elasticEmail.apiKey
         }
       })
     },
@@ -49,8 +62,8 @@ const sendResetEmail = async (userEmail, resetToken) => {
       transporter: nodemailer.createTransport({
         service: 'gmail',
         auth: {
-          user: process.env.APP_GMAIL,
-          pass: process.env.APP_GMAIL_PASSWORD
+          user: emailConfig.gmail.user,
+          pass: emailConfig.gmail.password
         },
         connectionTimeout: 10000,
         socketTimeout: 10000
@@ -66,7 +79,7 @@ const sendResetEmail = async (userEmail, resetToken) => {
       console.log(`✅ ${provider.name} подключение установлено`);
 
       const mailOptions = {
-        from: `EcoTracker <${process.env.APP_GMAIL}>`,
+        from: `EcoTracker <${emailConfig.gmail.user}>`,
         to: userEmail,
         subject: 'Сброс пароля - EcoTracker',
         html: `
@@ -90,9 +103,6 @@ const sendResetEmail = async (userEmail, resetToken) => {
       
       const result = await provider.transporter.sendMail(mailOptions);
       console.log(`✅ Email отправлен через ${provider.name}!`);
-      
-      // Закрываем соединение
-      provider.transporter.close();
       
       return { 
         success: true, 
@@ -476,3 +486,4 @@ app.listen(PORT, () => {
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
   console.log('📧 Email service: Настроен с резервными провайдерами');
 });
+
