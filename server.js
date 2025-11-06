@@ -28,23 +28,45 @@ db.connect((err) => {
   }
 });
 
-// Настройка Gmail
-const EMAIL_CONFIG = {
-  service: 'gmail',
-  auth: {
-    user: process.env.APP_GMAIL || 'ecotracker.app@gmail.com',
-    pass: process.env.APP_GMAIL_PASSWORD || 'vdaj mcyx uwjp sxgd'
-  }
+// Улучшенная настройка Gmail для Render
+const createEmailTransporter = () => {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.APP_GMAIL,
+      pass: process.env.APP_GMAIL_PASSWORD
+    },
+    // Важные настройки для хостингов
+    pool: true,
+    maxConnections: 1,
+    maxMessages: 5,
+    rateDelta: 1000,
+    rateLimit: 1,
+    socketTimeout: 60000, // 60 секунд
+    connectionTimeout: 60000, // 60 секунд
+    greetingTimeout: 30000, // 30 секунд
+    secure: true,
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
 };
 
 // Функция отправки email
 const sendResetEmail = async (userEmail, resetToken) => {
+  let transporter;
+  
   try {
-    // ИСПРАВЛЕНО: createTransport вместо createTransporter
-    const transporter = nodemailer.createTransport(EMAIL_CONFIG);
+    console.log('📧 Попытка отправки email на:', userEmail);
     
+    transporter = createEmailTransporter();
+    
+    // Проверяем подключение
+    await transporter.verify();
+    console.log('✅ SMTP подключение установлено');
+
     const mailOptions = {
-      from: `EcoTracker <${EMAIL_CONFIG.auth.user}>`,
+      from: `EcoTracker <${process.env.APP_GMAIL}>`,
       to: userEmail,
       subject: 'Сброс пароля - EcoTracker',
       html: `
@@ -66,25 +88,28 @@ const sendResetEmail = async (userEmail, resetToken) => {
       `
     };
     
-    await transporter.sendMail(mailOptions);
-    console.log('✅ Email отправлен успешно на:', userEmail);
+    const result = await transporter.sendMail(mailOptions);
+    console.log('✅ Email отправлен успешно! Message ID:', result.messageId);
     return { success: true };
     
   } catch (error) {
     console.error('❌ Ошибка отправки email:', error.message);
     
-    // Резервный вариант
-    console.log('🔐 Токен для ручного восстановления:', resetToken);
-    console.log('📧 Для email:', userEmail);
-    
+    // Всегда возвращаем токен для использования
     return { 
       success: false, 
-      error: 'Не удалось отправить email. Используйте этот код: ' + resetToken
+      error: 'Email не отправлен, но вы можете использовать этот код: ' + resetToken,
+      token: resetToken
     };
+  } finally {
+    // Закрываем соединение
+    if (transporter) {
+      transporter.close();
+    }
   }
 };
 
-// JWT секрет
+// JWT секрет и остальной код остается без изменений...
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-key-2024';
 
 // Middleware для проверки JWT токена
@@ -121,7 +146,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Регистрация пользователя
+// Регистрация пользователя (без изменений)
 app.post('/api/register', async (req, res) => {
   const { username, email, password } = req.body;
   
@@ -200,7 +225,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Вход пользователя
+// Вход пользователя (без изменений)
 app.post('/api/login', async (req, res) => {
   const { usernameOrEmail, password } = req.body;
   
@@ -317,7 +342,7 @@ app.post('/api/reset-password-request', async (req, res) => {
         
         console.log('✅ Токен сброса пароля создан для:', email);
         
-        // Отправляем email
+        // Всегда возвращаем токен, даже если email не отправится
         const emailResult = await sendResetEmail(email, resetToken);
         
         if (emailResult.success) {
@@ -326,7 +351,6 @@ app.post('/api/reset-password-request', async (req, res) => {
             message: 'Инструкции по сбросу пароля отправлены на ваш email'
           });
         } else {
-          // Если email не отправился, показываем токен
           res.json({ 
             success: true, 
             message: emailResult.error,
@@ -344,7 +368,7 @@ app.post('/api/reset-password-request', async (req, res) => {
   }
 });
 
-// Сброс пароля с токеном
+// Сброс пароля с токеном (без изменений)
 app.post('/api/reset-password', async (req, res) => {
   const { token, newPassword } = req.body;
   
@@ -446,5 +470,5 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('🚀 Sensor API с аутентификацией запущен на порту ' + PORT);
   console.log('🔐 JWT Secret:', JWT_SECRET ? 'Установлен' : 'Используется дефолтный');
-  console.log('📧 Email service: Настроен с Gmail');
+  console.log('📧 Email service: Настроен с улучшенными параметрами');
 });
